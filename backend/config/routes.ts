@@ -10,6 +10,7 @@ export interface RouteConfig {
   name: string;
   path: string;
   target: string;
+  targets?: string[];
   authRequired: boolean;
   rateLimit: RateLimitOptions;
 }
@@ -17,9 +18,10 @@ export interface RouteConfig {
 const routes: RouteConfig[] = [
   {
     id: 'route-users',
-    name: 'User Microservice Profile',
+    name: 'User Microservice Profile (Load Balanced)',
     path: '/api/users/profile',
     target: 'http://localhost:4001',
+    targets: ['http://localhost:4001', 'http://localhost:4003'],
     authRequired: true,
     rateLimit: { windowMs: 60000, max: 10 }
   },
@@ -28,6 +30,7 @@ const routes: RouteConfig[] = [
     name: 'Order Microservice List',
     path: '/api/orders/my-orders',
     target: 'http://localhost:4002',
+    targets: ['http://localhost:4002'],
     authRequired: true,
     rateLimit: { windowMs: 60000, max: 5 }
   },
@@ -36,10 +39,16 @@ const routes: RouteConfig[] = [
     name: 'Authentication Token Endpoint',
     path: '/auth/login',
     target: 'http://localhost:4001',
+    targets: ['http://localhost:4001', 'http://localhost:4003'],
     authRequired: false,
     rateLimit: { windowMs: 60000, max: 20 }
   }
 ];
+
+export function getTargets(route: RouteConfig): string[] {
+  if (route.targets && route.targets.length > 0) return route.targets;
+  return [route.target];
+}
 
 export function updateRouteConfig(id: string, newMax: number, authRequired?: boolean): boolean {
   const route = routes.find(r => r.id === id || r.path === id);

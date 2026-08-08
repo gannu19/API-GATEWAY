@@ -8,13 +8,16 @@
     "start": "next start -p 3005",
     "gateway": "ts-node backend/server.ts",
     "user-service": "ts-node backend/mock-services/userService.ts",
-    "order-service": "ts-node backend/mock-services/orderService.ts"
+    "user-service-2": "ts-node backend/mock-services/userService2.ts",
+    "order-service": "ts-node backend/mock-services/orderService.ts",
+    "dev:all": "concurrently -n \"USER1,USER2,ORDER,GATEWAY,DASHBOARD\" -c \"blue,cyan,yellow,green,magenta\" \"npm run user-service\" \"npm run user-service-2\" \"npm run order-service\" \"npm run gateway\" \"npm run dev\"",
+    "start:all": "concurrently -n \"USER1,USER2,ORDER,GATEWAY,DASHBOARD\" -c \"blue,cyan,yellow,green,magenta\" \"npm run user-service\" \"npm run user-service-2\" \"npm run order-service\" \"npm run gateway\" \"npm run dev\""
   },
   "dependencies": {
     "@clerk/nextjs": "^5.0.0",
     "chart.js": "^4.5.1",
-    "express": "^4.19.2",
     "dotenv": "^16.0.0",
+    "express": "^4.19.2",
     "express-http-proxy": "^2.0.0",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.378.0",
@@ -31,6 +34,7 @@
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.19",
+    "concurrently": "^10.0.4",
     "postcss": "^8.4.38",
     "tailwindcss": "^3.4.3",
     "ts-node": "^10.9.2",

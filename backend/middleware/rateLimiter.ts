@@ -1,6 +1,7 @@
 // backend/middleware/rateLimiter.ts
 import { Request, Response, NextFunction } from 'express';
 import { RateLimitOptions } from '../config/routes';
+import { loadPersistedData, savePersistedData } from '../db/persistence';
 
 export interface RequestLog {
   id: string;
@@ -12,7 +13,10 @@ export interface RequestLog {
 }
 
 const memoryStore = new Map<string, number[]>();
-const requestLogs: RequestLog[] = [];
+
+// Initialize request logs from persistence store
+const persisted = loadPersistedData();
+const requestLogs: RequestLog[] = persisted.logs || [];
 
 export function createRateLimiter(options: RateLimitOptions) {
   const windowMs = options.windowMs || 60000;
@@ -29,16 +33,24 @@ export function createRateLimiter(options: RateLimitOptions) {
     timestamps = timestamps.filter(ts => ts > windowStart);
 
     const isAllowed = timestamps.length < max;
-    requestLogs.unshift({
+    const newLog: RequestLog = {
       id: Math.random().toString(36).substr(2, 9),
       timestamp: new Date().toLocaleTimeString(),
       path: fullPath,
       client: clientId,
       status: isAllowed ? 200 : 429,
       allowed: isAllowed
-    });
+    };
 
-    if (requestLogs.length > 50) requestLogs.pop();
+    requestLogs.unshift(newLog);
+    if (requestLogs.length > 100) requestLogs.pop();
+
+    // Async persistence write
+    try {
+      savePersistedData({ logs: requestLogs.slice(0, 50) });
+    } catch (e) {
+      // Ignore background persistence errors
+    }
 
     if (!isAllowed) {
       const resetTime = Math.ceil((timestamps[0] + windowMs - now) / 1000);

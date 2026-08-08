@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: api-gateway-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  user-service-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+    container_name: user-service-1
+    command: npm run user-service
+    ports:
+      - "4001:4001"
+    environment:
+      - USER_SERVICE_PORT=4001
+
+  user-service-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+    container_name: user-service-2
+    command: npm run user-service-2
+    ports:
+      - "4003:4003"
+    environment:
+      - USER_SERVICE_2_PORT=4003
+
+  order-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+    container_name: order-service
+    command: npm run order-service
+    ports:
+      - "4002:4002"
+    environment:
+      - ORDER_SERVICE_PORT=4002
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: api-gateway-server
+    ports:
+      - "3000:3000"
+    environment:
+      - GATEWAY_PORT=3000
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+      - user-service-1
+      - user-service-2
+      - order-service
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: api-gateway-dashboard
+    ports:
+      - "3005:3005"
+    depends_on:
+      - gateway

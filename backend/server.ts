@@ -4,7 +4,7 @@ import express, { Request, Response, NextFunction } from 'express';
 import proxy from 'express-http-proxy';
 import routes, { updateRouteConfig, getTargets } from './config/routes';
 import { authenticateToken } from './middleware/auth';
-import { createRateLimiter, getRequestLogs } from './middleware/rateLimiter';
+import { createRateLimiter, getRequestLogs, attachServedByToLatestLog } from './middleware/rateLimiter';
 import { getCircuitBreaker, getAllBreakersStatus } from './middleware/circuitBreaker';
 import { loadPersistedData, savePersistedData } from './db/persistence';
 
@@ -62,13 +62,33 @@ app.get('/gateway/metrics', async (req: Request, res: Response) => {
   const allTargets = Array.from(new Set(routes.flatMap(r => getTargets(r))));
   const healthResults = await Promise.all(allTargets.map(target => checkServiceHealth(target)));
 
+  // Calculate instance distribution metrics from logs
+  const logs = getRequestLogs();
+  const instanceStats: Record<string, number> = {};
+  allTargets.forEach(t => { instanceStats[t] = 0; });
+  logs.forEach(log => {
+    if (log.servedBy && instanceStats[log.servedBy] !== undefined) {
+      instanceStats[log.servedBy]++;
+    }
+  });
+
+  const userRoute = routes.find(r => r.id === 'route-users');
+  const userTargets = userRoute ? getTargets(userRoute) : [];
+  const currentPointerIndex = userRoute ? (roundRobinIndices[userRoute.id] || 0) % userTargets.length : 0;
+
   res.json({
     status: 'ONLINE',
     port: PORT,
     routes: routes,
-    logs: getRequestLogs(),
+    logs: logs,
     circuitBreakers: getAllBreakersStatus(),
-    serviceHealth: healthResults
+    serviceHealth: healthResults,
+    loadBalancerStats: {
+      userRouteTargets: userTargets,
+      nextTargetIndex: currentPointerIndex,
+      nextTarget: userTargets[currentPointerIndex] || '',
+      instanceStats: instanceStats
+    }
   });
 });
 
@@ -120,6 +140,8 @@ routes.forEach(route => {
     const currentIndex = (roundRobinIndices[route.id] || 0) % targets.length;
     const targetUrl = targets[currentIndex];
     roundRobinIndices[route.id] = currentIndex + 1;
+
+    attachServedByToLatestLog(req.originalUrl || req.path, targetUrl);
 
     const breaker = getCircuitBreaker(targetUrl);
 

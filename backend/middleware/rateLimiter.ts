@@ -10,6 +10,7 @@ export interface RequestLog {
   client: string;
   status: number;
   allowed: boolean;
+  servedBy?: string;
 }
 
 const memoryStore = new Map<string, number[]>();
@@ -75,6 +76,13 @@ export function createRateLimiter(options: RateLimitOptions) {
 
     next();
   };
+}
+
+export function attachServedByToLatestLog(path: string, targetUrl: string) {
+  const matchingLog = requestLogs.find(log => log.path === path && !log.servedBy);
+  if (matchingLog) {
+    matchingLog.servedBy = targetUrl;
+  }
 }
 
 export function getRequestLogs(): RequestLog[] {

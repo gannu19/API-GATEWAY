@@ -37,7 +37,9 @@ import {
   RotateCcw,
   UserCheck,
   BarChart3,
-  PieChart
+  PieChart,
+  Cpu,
+  ArrowRight
 } from 'lucide-react';
 
 // Register Chart.js Modules
@@ -59,6 +61,7 @@ export interface RouteConfig {
   name: string;
   path: string;
   target: string;
+  targets?: string[];
   authRequired: boolean;
   rateLimit: {
     windowMs: number;
@@ -73,6 +76,7 @@ export interface RequestLog {
   client: string;
   status: number;
   allowed: boolean;
+  servedBy?: string;
 }
 
 export interface CircuitBreakerStatus {
@@ -88,6 +92,13 @@ export interface ServiceHealth {
   details: any;
 }
 
+export interface LoadBalancerStats {
+  userRouteTargets: string[];
+  nextTargetIndex: number;
+  nextTarget: string;
+  instanceStats: Record<string, number>;
+}
+
 export interface GatewayMetrics {
   status: string;
   port: number;
@@ -95,6 +106,7 @@ export interface GatewayMetrics {
   logs: RequestLog[];
   circuitBreakers: CircuitBreakerStatus[];
   serviceHealth: ServiceHealth[];
+  loadBalancerStats?: LoadBalancerStats;
 }
 
 export interface ApiResponseState {
@@ -118,6 +130,7 @@ export default function Dashboard() {
   const [selectedEndpoint, setSelectedEndpoint] = useState<string>('/api/users/profile');
   const [apiResponse, setApiResponse] = useState<ApiResponseState | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+  const [simulatingLB, setSimulatingLB] = useState<boolean>(false);
   const [editingRouteId, setEditingRouteId] = useState<string | null>(null);
   const [newRateLimitMax, setNewRateLimitMax] = useState<number>(10);
 
@@ -148,7 +161,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetchMetrics();
-    const interval = setInterval(fetchMetrics, 3000);
+    const interval = setInterval(fetchMetrics, 2500);
     return () => clearInterval(interval);
   }, []);
 
@@ -243,6 +256,45 @@ export default function Dashboard() {
     fetchMetrics();
   };
 
+  const handleSimulate4Requests = async () => {
+    setSimulatingLB(true);
+    try {
+      let currentAuthToken = token;
+      if (!currentAuthToken) {
+        const loginRes = await fetch('http://localhost:3000/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: 'sde_user', password: 'pass123' })
+        });
+        const loginData = await loginRes.json();
+        if (loginData.token) {
+          currentAuthToken = loginData.token;
+          setToken(loginData.token);
+          setTokenSource('Mock JWT');
+        }
+      }
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (currentAuthToken) headers['Authorization'] = `Bearer ${currentAuthToken}`;
+
+      for (let i = 0; i < 4; i++) {
+        const res = await fetch('http://localhost:3000/api/users/profile', { method: 'GET', headers });
+        const data = await res.json();
+        setApiResponse({
+          status: res.status,
+          statusText: res.status === 200 ? '200 OK' : `${res.status}`,
+          data
+        });
+        await fetchMetrics();
+        await new Promise(r => setTimeout(r, 450));
+      }
+    } catch (e) {
+      // Ignore
+    }
+    setSimulatingLB(false);
+    fetchMetrics();
+  };
+
   const handleUpdateRouteLimit = async (path: string, max: number) => {
     try {
       const res = await fetch('http://localhost:3000/gateway/routes/update', {
@@ -305,6 +357,14 @@ export default function Dashboard() {
   const circuitBreakerOpenCount = metrics?.circuitBreakers?.filter(b => b.state !== 'CLOSED').length || 0;
   const serviceUpCount = metrics?.serviceHealth?.filter(s => s.status === 'UP').length || 0;
   const serviceTotalCount = metrics?.serviceHealth?.length || 0;
+
+  const lbStats = metrics?.loadBalancerStats;
+  const targetInstances = [
+    { name: 'Instance 1', url: 'http://localhost:4001', port: 4001, color: 'from-blue-500 to-indigo-600' },
+    { name: 'Instance 2', url: 'http://localhost:4003', port: 4003, color: 'from-cyan-500 to-blue-600' },
+    { name: 'Instance 3', url: 'http://localhost:4004', port: 4004, color: 'from-purple-500 to-indigo-600' },
+    { name: 'Instance 4', url: 'http://localhost:4005', port: 4005, color: 'from-emerald-500 to-teal-600' }
+  ];
 
   // Chart 1: Traffic Line Chart Data
   const lineChartData = {
@@ -383,7 +443,7 @@ export default function Dashboard() {
                 API Gateway Control Center
               </h1>
               <p className={`text-xs md:text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                Chart.js Analytics • Clerk Auth • Rate Limiting • TypeScript & Tailwind CSS
+                4-Instance Load Balancer • Clerk Auth • Dynamic Rate Limiter • Circuit Breaker
               </p>
             </div>
           </div>
@@ -452,20 +512,20 @@ export default function Dashboard() {
 
           <div className="glass-panel p-5 rounded-2xl">
             <div className="flex justify-between items-start mb-3">
-              <span className={`text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Allowed (200 OK)</span>
-              <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+              <span className={`text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Service Health</span>
+              <Server className="w-5 h-5 text-emerald-500" />
             </div>
-            <div className="text-2xl font-bold text-emerald-500">{allowedLogs}</div>
-            <span className="text-xs text-slate-500 mt-1 block">Successful microservice proxies</span>
+            <div className="text-2xl font-bold text-emerald-500">{serviceUpCount} / {serviceTotalCount} UP</div>
+            <span className="text-xs text-slate-500 mt-1 block">Active downstream replicas</span>
           </div>
 
           <div className="glass-panel p-5 rounded-2xl">
             <div className="flex justify-between items-start mb-3">
-              <span className={`text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Rate Limits Blocked</span>
+              <span className={`text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Rate Limited Blocks</span>
               <AlertTriangle className="w-5 h-5 text-amber-500" />
             </div>
             <div className="text-2xl font-bold text-amber-500">{blockedLogs}</div>
-            <span className="text-xs text-slate-500 mt-1 block">HTTP 429 quota protections</span>
+            <span className="text-xs text-slate-500 mt-1 block">HTTP 429 Security blocks</span>
           </div>
 
           <div className="glass-panel p-5 rounded-2xl">
@@ -473,130 +533,217 @@ export default function Dashboard() {
               <span className={`text-xs font-medium uppercase tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Circuit Breakers</span>
               <Zap className="w-5 h-5 text-purple-500" />
             </div>
-            <div className="text-2xl font-bold text-emerald-500">
-              {circuitBreakerOpenCount === 0 ? 'CLOSED' : `${circuitBreakerOpenCount} OPEN`}
-              <span className="text-xs font-normal opacity-75">({circuitBreakerOpenCount === 0 ? 'Healthy' : 'Needs attention'})</span>
-            </div>
-            <span className="text-xs text-slate-500 mt-1 block">{metrics?.circuitBreakers?.length || 0} monitored targets</span>
+            <div className="text-2xl font-bold text-purple-500">{circuitBreakerOpenCount === 0 ? 'All Closed' : `${circuitBreakerOpenCount} Open`}</div>
+            <span className="text-xs text-slate-500 mt-1 block">Failure isolation state</span>
           </div>
         </div>
 
-        {/* 📈 Chart.js Visualizations Section */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          
-          {/* Chart 1: Real-time Traffic Line Chart */}
-          <div className="lg:col-span-8 glass-panel p-6 rounded-2xl">
-            <div className="flex items-center justify-between border-b pb-4 mb-4 border-slate-700/40">
-              <div className="flex items-center gap-2">
-                <BarChart3 className="w-5 h-5 text-blue-500" />
-                <h2 className="text-lg font-semibold">Real-Time Traffic Trends (Chart.js)</h2>
+        {/* 🌟 LIVE 4-INSTANCE LOAD BALANCER INSPECTOR PANEL 🌟 */}
+        <div className={`p-6 rounded-2xl border transition ${
+          isDark 
+            ? 'bg-gradient-to-br from-slate-900/90 via-slate-900/50 to-blue-950/40 border-blue-500/30 shadow-2xl' 
+            : 'bg-gradient-to-br from-white via-blue-50/40 to-slate-50 border-blue-200 shadow-xl'
+        }`}>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b pb-5 mb-6 border-blue-500/20">
+            <div>
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-blue-500/20 text-blue-400 rounded-lg border border-blue-500/40">
+                  <Cpu className="w-5 h-5 animate-pulse" />
+                </div>
+                <h2 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-indigo-300 bg-clip-text text-transparent">
+                  Live 4-Instance Load Balancer Inspector (Round-Robin)
+                </h2>
               </div>
-              <span className="text-[10px] px-2 py-0.5 bg-blue-500/20 text-blue-400 rounded font-mono">Live Stream</span>
+              <p className={`text-xs mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                Requests dynamically rotate across 4 User Service replicas (<code className="text-blue-400">Instance 1 ➔ 2 ➔ 3 ➔ 4 ➔ 1</code>)
+              </p>
             </div>
-            <div className="h-[260px] w-full">
-              <Line data={lineChartData} options={chartOptions} />
+
+            <button
+              onClick={handleSimulate4Requests}
+              disabled={simulatingLB}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-xs transition shadow-lg ${
+                simulatingLB
+                  ? 'bg-blue-600/50 cursor-not-allowed text-white'
+                  : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-blue-600/30'
+              }`}
+            >
+              <RefreshCw className={`w-4 h-4 ${simulatingLB ? 'animate-spin' : ''}`} />
+              <span>{simulatingLB ? 'Routing Requests Live...' : '🔥 Fire 4 Sequential Requests (Test Round-Robin)'}</span>
+            </button>
+          </div>
+
+          {/* 4 Instance Cards Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {targetInstances.map((inst, index) => {
+              const status = getServiceStatus(inst.url);
+              const requestCount = lbStats?.instanceStats ? (lbStats.instanceStats[inst.url] || 0) : 0;
+              const isNextInQueue = lbStats ? lbStats.nextTargetIndex === index : index === 0;
+
+              return (
+                <div
+                  key={inst.port}
+                  className={`p-4 rounded-xl border relative transition-all duration-300 ${
+                    isNextInQueue
+                      ? 'border-blue-500 ring-2 ring-blue-500/40 bg-blue-950/30 shadow-lg scale-[1.02]'
+                      : isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
+                  }`}
+                >
+                  {isNextInQueue && (
+                    <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 px-2.5 py-0.5 bg-blue-600 text-white font-mono text-[9px] font-bold rounded-full shadow border border-blue-400 animate-bounce flex items-center gap-1">
+                      <span>NEXT IN QUEUE</span>
+                      <ArrowRight className="w-2.5 h-2.5" />
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between mb-3 mt-1">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-2.5 h-2.5 rounded-full ${status === 'UP' ? 'bg-emerald-500 animate-ping' : 'bg-rose-500'}`} />
+                      <span className="font-bold text-sm">{inst.name}</span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                      :{inst.port}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="opacity-70">Status:</span>
+                      <span className={`font-semibold ${status === 'UP' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {status === 'UP' ? 'UP (Healthy)' : 'DOWN'}
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="opacity-70">Requests Served:</span>
+                      <span className="font-mono font-bold text-amber-400 text-sm">{requestCount}</span>
+                    </div>
+
+                    {/* Visual Load Bar */}
+                    <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden mt-3 border border-slate-700/50">
+                      <div
+                        className={`h-full bg-gradient-to-r ${inst.color} transition-all duration-500`}
+                        style={{ width: `${Math.min(100, Math.max(10, (requestCount / (logs.length || 1)) * 100))}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Charts & Graphs Row */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <div className="lg:col-span-8 glass-panel p-6 rounded-2xl flex flex-col justify-between">
+            <div className="flex items-center justify-between border-b pb-4 mb-4 border-slate-800">
+              <div className="flex items-center gap-2">
+                <BarChart3 className="w-5 h-5 text-emerald-500" />
+                <h2 className="text-lg font-semibold">Real-Time Traffic Stream (Chart.js)</h2>
+              </div>
+              <span className="text-xs text-slate-400 font-mono">Live HTTP Status</span>
+            </div>
+            <div className="h-64 w-full">
+              <Line data={lineChartData} options={chartOptions as any} />
             </div>
           </div>
 
-          {/* Chart 2: Route Distribution Doughnut Chart */}
-          <div className="lg:col-span-4 glass-panel p-6 rounded-2xl">
-            <div className="flex items-center justify-between border-b pb-4 mb-4 border-slate-700/40">
+          <div className="lg:col-span-4 glass-panel p-6 rounded-2xl flex flex-col justify-between">
+            <div className="flex items-center justify-between border-b pb-4 mb-4 border-slate-800">
               <div className="flex items-center gap-2">
-                <PieChart className="w-5 h-5 text-purple-500" />
-                <h2 className="text-lg font-semibold">Route Distribution</h2>
+                <PieChart className="w-5 h-5 text-blue-500" />
+                <h2 className="text-lg font-semibold">Endpoint Share</h2>
               </div>
             </div>
-            <div className="h-[240px] w-full flex items-center justify-center">
-              <Doughnut data={doughnutChartData} options={{ responsive: true, maintainAspectRatio: false }} />
+            <div className="h-64 w-full flex items-center justify-center">
+              <Doughnut data={doughnutChartData} options={chartOptions as any} />
             </div>
           </div>
         </div>
 
-        {/* Playground & Traffic Feed */}
+        {/* API Testing Playground & Live Security Log Stream */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           
-          {/* API Playground */}
+          {/* Left Panel: Postman-style API Tester */}
           <div className="lg:col-span-7 glass-panel p-6 rounded-2xl space-y-6">
             <div className={`flex items-center justify-between border-b pb-4 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <div className="flex items-center gap-2">
                 <Terminal className="w-5 h-5 text-blue-500" />
-                <h2 className="text-lg font-semibold">Interactive API Playground</h2>
+                <h2 className="text-lg font-semibold">Interactive API Testing Console</h2>
               </div>
+              
               <button
                 onClick={handleQuickLogin}
-                className="flex items-center gap-2 px-3 py-1.5 bg-blue-600/10 hover:bg-blue-600/20 text-blue-500 border border-blue-500/30 rounded-lg text-xs font-medium transition"
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-semibold transition shadow"
               >
                 <Key className="w-3.5 h-3.5" />
-                {token ? 'Refresh JWT Token' : 'Get Mock JWT Token'}
+                <span>Get JWT Token</span>
               </button>
             </div>
 
-            {token ? (
-              <div className={`p-3 rounded-xl border text-xs flex items-center justify-between gap-2 ${
-                isDark ? 'bg-slate-900/80 border-blue-500/30' : 'bg-blue-50/80 border-blue-200'
-              }`}>
-                <div className="truncate font-mono">
-                  <span className="text-blue-500 font-semibold">[{tokenSource} Token]: </span>
-                  {token}
-                </div>
-                <span className="text-[10px] px-2 py-0.5 bg-emerald-500/20 text-emerald-500 rounded-md font-semibold shrink-0">ACTIVE</span>
-              </div>
-            ) : (
-              <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-500 flex items-center gap-2">
+            {/* Token Status Header */}
+            <div className={`p-3.5 rounded-xl border flex items-center justify-between text-xs font-mono ${
+              token ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+            }`}>
+              <div className="flex items-center gap-2 truncate">
                 <Lock className="w-4 h-4 shrink-0" />
-                Sign in with <strong>Clerk</strong> above or click <strong>"Get Mock JWT Token"</strong> to test authenticated routes!
-              </div>
-            )}
-
-            <div className="space-y-3">
-              <label className={`text-xs font-medium block ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Select Microservice Endpoint:</label>
-              <div className="flex gap-2">
-                <select
-                  value={selectedEndpoint}
-                  onChange={(e) => setSelectedEndpoint(e.target.value)}
-                  className={`flex-1 border rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:border-blue-500 font-mono ${
-                    isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-300 text-slate-800'
-                  }`}
-                >
-                  <option value="/api/users/profile">GET /api/users/profile (User Service)</option>
-                  <option value="/api/orders/my-orders">GET /api/orders/my-orders (Order Service)</option>
-                  <option value="/auth/login">POST /auth/login (Public Route)</option>
-                </select>
-
-                <button
-                  onClick={handleExecuteRequest}
-                  disabled={loading}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-xl text-sm transition shadow-lg shadow-blue-600/20 disabled:opacity-50"
-                >
-                  {loading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                  Send Request
-                </button>
+                <span className="truncate">
+                  {token ? `Active Bearer Token (${tokenSource}): ${token.substring(0, 24)}...` : 'No Auth Token set. Restricted endpoints will return HTTP 401.'}
+                </span>
               </div>
             </div>
 
+            {/* Endpoint Selector & Send Button */}
+            <div className="space-y-4">
+              <div>
+                <label className={`text-xs font-medium block mb-2 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Target Endpoint</label>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedEndpoint}
+                    onChange={(e) => setSelectedEndpoint(e.target.value)}
+                    className={`flex-1 p-2.5 rounded-xl text-xs font-mono border focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                      isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-300 text-slate-900'
+                    }`}
+                  >
+                    <option value="/api/users/profile">GET /api/users/profile (4 Replicas, Limit: 20 req/min)</option>
+                    <option value="/api/orders/my-orders">GET /api/orders/my-orders (Port 4002, Limit: 5 req/min)</option>
+                    <option value="/auth/login">POST /auth/login (Auth Issuer)</option>
+                  </select>
+
+                  <button
+                    onClick={handleExecuteRequest}
+                    disabled={loading}
+                    className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold transition shadow disabled:opacity-50"
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                    <span>{loading ? 'Sending...' : 'Send Request'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Response Viewer */}
             {apiResponse && (
-              <div className="space-y-2 pt-2">
-                <div className={`flex items-center justify-between text-xs font-mono ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                  <span>Response Payload:</span>
-                  <div className="flex items-center gap-3">
-                    {apiResponse.latencyMs !== undefined && <span>Latency: {apiResponse.latencyMs}ms</span>}
-                    {apiResponse.rateLimitRemaining !== null && (
-                      <span className="text-blue-500 font-semibold">
-                        Quota Remaining: {apiResponse.rateLimitRemaining}
-                      </span>
+              <div className="space-y-2 font-mono text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Gateway Response Output:</span>
+                  <div className="flex items-center gap-2 font-semibold">
+                    <span className={`px-2 py-0.5 rounded ${apiResponse.status === 200 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                      {apiResponse.statusText || apiResponse.status}
+                    </span>
+                    {apiResponse.latencyMs !== undefined && (
+                      <span className="text-slate-400">{apiResponse.latencyMs}ms</span>
                     )}
                   </div>
                 </div>
 
-                <div className={`p-4 rounded-xl border font-mono text-xs overflow-x-auto ${
-                  apiResponse.status === 200 
-                    ? isDark ? 'bg-slate-900 border-emerald-500/40 text-emerald-300' : 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                    : apiResponse.status === 429 
-                    ? isDark ? 'bg-amber-950/40 border-amber-500/50 text-amber-300' : 'bg-amber-50 border-amber-300 text-amber-800'
-                    : isDark ? 'bg-rose-950/40 border-rose-500/40 text-rose-300' : 'bg-rose-50 border-rose-300 text-rose-800'
+                <div className={`p-4 rounded-xl border overflow-x-auto max-h-60 ${
+                  apiResponse.status === 200
+                    ? isDark ? 'bg-slate-900 border-emerald-500/30 text-emerald-300' : 'bg-slate-900 text-emerald-300'
+                    : isDark ? 'bg-slate-900 border-rose-500/30 text-rose-300' : 'bg-slate-900 text-rose-300'
                 }`}>
-                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-700/50 text-xs font-semibold">
-                    <span>Status: {apiResponse.statusText || apiResponse.status}</span>
+                  <div className="flex items-center justify-between text-[11px] border-b border-slate-800 pb-2 mb-2">
+                    <span>Remaining Quota: {apiResponse.rateLimitRemaining ?? 'N/A'} / {apiResponse.rateLimitLimit ?? 'N/A'}</span>
                     {apiResponse.retryAfter && <span className="text-amber-500">Retry After: {apiResponse.retryAfter}s</span>}
                   </div>
                   <pre>{JSON.stringify(apiResponse.data || apiResponse.error || apiResponse, null, 2)}</pre>
@@ -610,7 +757,7 @@ export default function Dashboard() {
             <div className={`flex items-center justify-between border-b pb-4 mb-4 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
               <div className="flex items-center gap-2">
                 <Server className="w-5 h-5 text-purple-500" />
-                <h2 className="text-lg font-semibold">Live Traffic Logs & Service Health</h2>
+                <h2 className="text-lg font-semibold">Live Traffic Logs & Replicas</h2>
               </div>
               
               <button
@@ -624,16 +771,15 @@ export default function Dashboard() {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 gap-3 mb-4">
+            <div className="grid grid-cols-2 gap-2 mb-4">
               {metrics?.serviceHealth?.map((service) => (
-                <div key={service.target} className={`rounded-2xl p-3 border ${isDark ? 'border-slate-800' : 'border-slate-200'} ${service.status === 'UP' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-rose-500/10 text-rose-300'}`}>
-                  <div className="flex items-center justify-between gap-2 text-xs font-semibold">
-                    <span>{service.target}</span>
-                    <span className={`px-2 py-0.5 rounded-full ${service.status === 'UP' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-rose-500/20 text-rose-500'}`}>
+                <div key={service.target} className={`rounded-xl p-2.5 border ${isDark ? 'border-slate-800' : 'border-slate-200'} ${service.status === 'UP' ? 'bg-emerald-500/10 text-emerald-300' : 'bg-rose-500/10 text-rose-300'}`}>
+                  <div className="flex items-center justify-between gap-1 text-[11px] font-semibold">
+                    <span className="truncate">{service.target}</span>
+                    <span className={`px-1.5 py-0.2 rounded ${service.status === 'UP' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
                       {service.status}
                     </span>
                   </div>
-                  <div className="mt-2 text-[10px] opacity-80">Code {service.statusCode}</div>
                 </div>
               ))}
             </div>
@@ -657,7 +803,9 @@ export default function Dashboard() {
                       )}
                       <div className="truncate">
                         <span className="font-semibold">{log.path}</span>
-                        <span className="text-[10px] opacity-70 block">Client ID: {log.client}</span>
+                        <span className="text-[10px] opacity-70 block">
+                          Client: {log.client} {log.servedBy ? `• ${log.servedBy}` : ''}
+                        </span>
                       </div>
                     </div>
                     <div className="text-right shrink-0">
@@ -672,7 +820,7 @@ export default function Dashboard() {
                 ))
               ) : (
                 <div className="text-center py-12 text-slate-500 text-xs">
-                  No requests recorded yet. Use the playground to send requests!
+                  No requests recorded yet. Use the playground or load balancer test button!
                 </div>
               )}
             </div>
@@ -693,7 +841,7 @@ export default function Dashboard() {
               <thead>
                 <tr className={`border-b ${isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-500'}`}>
                   <th className="pb-3 font-medium">Route Path</th>
-                  <th className="pb-3 font-medium">Target Microservice</th>
+                  <th className="pb-3 font-medium">Target Replicas</th>
                   <th className="pb-3 font-medium">Authentication</th>
                   <th className="pb-3 font-medium">Max Quota Limit</th>
                   <th className="pb-3 font-medium">Circuit Breaker</th>
@@ -705,7 +853,15 @@ export default function Dashboard() {
                   metrics.routes.map((r: RouteConfig) => (
                     <tr key={r.id} className={isDark ? 'hover:bg-slate-900/40' : 'hover:bg-slate-100/60'}>
                       <td className="py-3 font-bold text-blue-500">{r.path}</td>
-                      <td className="py-3 opacity-80">{r.target}</td>
+                      <td className="py-3 opacity-80">
+                        {r.targets && r.targets.length > 1 ? (
+                          <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 rounded text-[10px]">
+                            {r.targets.length} Target Replicas
+                          </span>
+                        ) : (
+                          r.target
+                        )}
+                      </td>
                       <td className="py-3">
                         {r.authRequired ? (
                           <span className="px-2 py-0.5 bg-blue-500/10 text-blue-500 border border-blue-500/30 rounded text-[10px]">
@@ -782,6 +938,7 @@ export default function Dashboard() {
             </table>
           </div>
         </div>
+
       </main>
     </div>
   );

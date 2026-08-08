@@ -18,12 +18,17 @@ export interface RouteConfig {
 const routes: RouteConfig[] = [
   {
     id: 'route-users',
-    name: 'User Microservice Profile (Load Balanced)',
+    name: 'User Microservice Profile (4 Replicas)',
     path: '/api/users/profile',
     target: 'http://localhost:4001',
-    targets: ['http://localhost:4001', 'http://localhost:4003'],
+    targets: [
+      'http://localhost:4001',
+      'http://localhost:4003',
+      'http://localhost:4004',
+      'http://localhost:4005'
+    ],
     authRequired: true,
-    rateLimit: { windowMs: 60000, max: 10 }
+    rateLimit: { windowMs: 60000, max: 20 }
   },
   {
     id: 'route-orders',
@@ -39,7 +44,12 @@ const routes: RouteConfig[] = [
     name: 'Authentication Token Endpoint',
     path: '/auth/login',
     target: 'http://localhost:4001',
-    targets: ['http://localhost:4001', 'http://localhost:4003'],
+    targets: [
+      'http://localhost:4001',
+      'http://localhost:4003',
+      'http://localhost:4004',
+      'http://localhost:4005'
+    ],
     authRequired: false,
     rateLimit: { windowMs: 60000, max: 20 }
   }

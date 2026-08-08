@@ -34,6 +34,28 @@ services:
     environment:
       - USER_SERVICE_2_PORT=4003
 
+  user-service-3:
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+    container_name: user-service-3
+    command: npm run user-service-3
+    ports:
+      - "4004:4004"
+    environment:
+      - USER_SERVICE_3_PORT=4004
+
+  user-service-4:
+    build:
+      context: .
+      dockerfile: Dockerfile.microservice
+    container_name: user-service-4
+    command: npm run user-service-4
+    ports:
+      - "4005:4005"
+    environment:
+      - USER_SERVICE_4_PORT=4005
+
   order-service:
     build:
       context: .
@@ -59,6 +81,8 @@ services:
       - redis
       - user-service-1
       - user-service-2
+      - user-service-3
+      - user-service-4
       - order-service
 
   dashboard:
